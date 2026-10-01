@@ -10,22 +10,37 @@ copy paste file in you "C:\Users\yours"
  
  py Angra_lmstudio.py install
 angra
+
 angra primary "GPT-OSS-20B"
+
 angra link "GPT-OSS-20B" "DeepSeek-Coder-V2-Lite"
+
 angra allow "DeepSeek-Coder-V2-Lite" --session
+
 angra doctor
+
 angra uninstall
 
-##angra bionic prompt:
+### angra bionic prompt:
+
 py Angra_bionic.py 
+
 angra-bionic models
+
 angra-bionic select       (مدل رو انتخاب و تأیید می‌کنید)
+
 angra-bionic enable       (تخمین منابع، تأیید، لود)
+
 angra-bionic disable
+
 angra-bionic config set max_gpu_budget_gb 6 
+
 angra-bionic test
+
 angra-bionic doctor
+
 angra-bionic status --json
+
 angra-bionic uninstall
 
 ANGRA — AI Model Collaboration Bridge
