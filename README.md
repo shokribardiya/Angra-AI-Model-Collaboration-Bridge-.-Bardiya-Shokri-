@@ -6,7 +6,7 @@ Open-source bridge for coordinating local AI models across LM Studio and Bionic.
 
 Bardiya Shokri
 copy paste file in you "C:\Users\yours"
- ##angra lm studio prompt :
+ ### angra lm studio prompt :
  
  py Angra_lmstudio.py install
 angra
