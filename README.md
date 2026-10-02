@@ -3,6 +3,7 @@
 # ANGRA
 
 **Local-first observability and model-to-model coordination for LM Studio and Bionic.**
+<img width="1024" height="1536" alt="file_00000000b61482108f0418ab8ff96ee5" src="https://github.com/user-attachments/assets/6751ff44-5cd0-4efc-9351-bdfb037de923" />
 
 *Observe. Analyze. Verify. Challenge. Reconstruct. Coordinate.*
 
@@ -36,6 +37,9 @@ runtimes and you:
 ANGRA is **not** a model, **not** an LLM, and **not** a replacement for
 LM Studio or Bionic. It is the layer around them.
 
+<img width="1536" height="1024" alt="file_000000002dac82109879474e5a09ecdf" src="https://github.com/user-attachments/assets/0e333f63-e3b3-416c-913e-1198200cd0d9" />
+
+
 ## Features
 
 ### Real-time observability (LM Studio)
@@ -65,6 +69,7 @@ LM Studio or Bionic. It is the layer around them.
 - **Safe defaults.** Automatic features are off until you turn them on.
 
 ## Quick start
+<img width="1536" height="1024" alt="file_00000000f11c8210946039a017d7a3fd (1)" src="https://github.com/user-attachments/assets/47bfc8ac-41e7-46bf-a1c5-b95c3eb45782" />
 
 ### Requirements
 
@@ -187,6 +192,9 @@ release for reproducible setups, and treat any feature not listed under
 - [ ] Tagged releases with checksums
 - [ ] Cross-machine workers (authenticated and encrypted)
 
+<img width="1024" height="1536" alt="file_00000000117c82109da9b4390ce1e909" src="https://github.com/user-attachments/assets/f07d6507-1666-42c3-bc12-a97ca393515b" />
+
+
 ## Contributing
 
 Issues and pull requests are welcome. Good first areas: tests, Linux and
@@ -207,4 +215,5 @@ Website: <https://shokribardiya.github.io/Angra_AI/>
 ## Citation
 
 If ANGRA helps your work, please cite it (see `CITATION.cff`).
+<img width="1024" height="1536" alt="file_00000000b61482108f0418ab8ff96ee5" src="https://github.com/user-attachments/assets/8cf50f78-f3b2-45d1-88e7-72cd9b75a3db" />
 
