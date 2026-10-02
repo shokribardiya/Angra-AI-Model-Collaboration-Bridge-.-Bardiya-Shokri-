@@ -198,7 +198,8 @@ first.
 See [LICENSE](LICENSE).
 
 ## Author
-
+https://shokribardiya.github.io/Oblivions0.github.io/
+https://shokribardiya.github.io/OblivionStudioDev/
 Built by **Bardiya Shokri** ([@shokribardiya](https://github.com/shokribardiya))
 under the Oblivion project.
 Website: <https://shokribardiya.github.io/Angra_AI/>
