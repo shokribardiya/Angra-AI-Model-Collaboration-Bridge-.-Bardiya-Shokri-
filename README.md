@@ -1,6 +1,6 @@
 <div align="center">
 
-# ANGRA
+# ANGRA Kythons
 
 **Local-first observability and model-to-model coordination for LM Studio and Bionic.**
 <img width="1024" height="1536" alt="file_00000000b61482108f0418ab8ff96ee5" src="https://github.com/user-attachments/assets/6751ff44-5cd0-4efc-9351-bdfb037de923" />
