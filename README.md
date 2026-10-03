@@ -94,6 +94,7 @@ angra link "GPT-OSS-20B" "DeepSeek-Coder-V2-Lite"
 # 5. Allow the link for this session only
 angra allow "DeepSeek-Coder-V2-Lite" --session
 ```
+<img width="1320" height="1080" alt="angra_10_safety_limits" src="https://github.com/user-attachments/assets/5546e233-d011-435b-a58c-37ba273804df" />
 
 ### Bionic
 
@@ -109,6 +110,7 @@ angra-bionic doctor
 ```
 
 ## Commands
+<img width="1320" height="780" alt="angra_12_latency_model" src="https://github.com/user-attachments/assets/46fc6314-6004-4a8a-8658-05eb99d90ec8" />
 
 ### `angra` (LM Studio)
 
@@ -135,6 +137,7 @@ angra-bionic doctor
 | `uninstall` | Removes everything it added |
 
 ## How it works
+<img width="1320" height="1080" alt="angra_10_safety_limits" src="https://github.com/user-attachments/assets/fc53e820-6764-4c2e-b310-49ac0a707d27" />
 
 ```mermaid
 flowchart LR
@@ -182,6 +185,7 @@ release for reproducible setups, and treat any feature not listed under
 "Features" as experimental.
 
 ## Roadmap
+<img width="1680" height="900" alt="angra_07_code_metrics" src="https://github.com/user-attachments/assets/95dea4cb-d5b7-446c-9727-69ebac05066f" />
 
 - [x] LM Studio integration (`Angra_lmstudio.py`)
 - [x] Bionic integration (`Angra_bionic.py`)
@@ -216,6 +220,10 @@ Website: <https://shokribardiya.github.io/Angra_AI/>
 
 If ANGRA helps your work, please cite it (see `CITATION.cff`).
 <img width="1024" height="1536" alt="file_00000000b61482108f0418ab8ff96ee5" src="https://github.com/user-attachments/assets/8cf50f78-f3b2-45d1-88e7-72cd9b75a3db" />
+<img width="1560" height="1080" alt="angra_17_consult_sequence" src="https://github.com/user-attachments/assets/1bb42b29-db48-4c3c-a018-7a2e70b70002" />
+<img width="1024" height="686" alt="angra_03_permission_states" src="https://github.com/user-attachments/assets/a2b7d68b-bbf6-43e1-bc3b-816bc1f4b1ee" />
+<img width="1944" height="874" alt="angra_06_install_flow" src="https://github.com/user-attachments/assets/f8b5ed3e-d6a6-42d6-899d-db228ec11269" />
+<img width="1901" height="459" alt="angra_04_topology_rules" src="https://github.com/user-attachments/assets/61752069-0fe7-4bf3-9574-e9280e477d9f" />
 
 # ANGRA
 
@@ -264,6 +272,9 @@ Angra is two products in one file:
 **Angra is not:** a model router, an agent framework, a load balancer, or a way to merge two models into one. It does not make the primary stronger in general; it lets the primary delegate a small sub-question.
 
 ---
+<img width="1430" height="780" alt="angra_delta_strong_hw" src="https://github.com/user-attachments/assets/459a03c3-67da-4c15-bdda-c5f81e66345e" />
+in strong hardware ^
+<img width="1430" height="780" alt="angra_delta-1" src="https://github.com/user-attachments/assets/58d73105-3c34-4fb3-be81-6df701d1be20" />
 
 ## Requirements
 
@@ -325,6 +336,7 @@ No command writes to a model. `uninstall` has the largest write surface (state, 
 ---
 
 ## How a consultation works
+<img width="924" height="1760" alt="angra_08_call_graph" src="https://github.com/user-attachments/assets/dd56b6d5-6e0e-47b8-aede-185f36046515" />
 
 The primary model sees four tools:
 
@@ -344,6 +356,7 @@ Before anything is sent, 11 guards run in order and fail closed. Every denial ha
 The helper receives a fixed system prompt ("answer only the specific task, concisely, do not ask questions back") plus the task and optional minimal context. It returns text only. The primary writes the final answer.
 
 ---
+<img width="1680" height="720" alt="angra_13_montecarlo_gain" src="https://github.com/user-attachments/assets/207c2c8a-0e9e-43e6-af3e-aa1fb73026c7" />
 
 ## Permissions
 
@@ -363,6 +376,8 @@ A link is reported in one of three states:
 ![Link states](docs/img/link_states.png)
 
 ---
+<img width="952" height="748" alt="local_frontier_profile-1" src="https://github.com/user-attachments/assets/07a8e3d0-4a1d-43ca-a0ae-f67bfa8f151c" />
+<img width="952" height="748" alt="local_frontier_profile-2" src="https://github.com/user-attachments/assets/d607e57e-0610-418e-b43d-4ef47ff747c4" />
 
 ## Connection graph rules
 
@@ -397,6 +412,11 @@ The input cap is enforced in characters (`max_helper_context x 4`) and oversized
 ![Information funnel](docs/img/information_funnel.png)
 
 ---
+<img width="1430" height="1430" alt="angra_radar_strong_hw" src="https://github.com/user-attachments/assets/1f563008-f4ef-4d90-8247-d4d5d53ea631" />
+<img width="1088" height="647" alt="vision_benchmark_snapshot-2" src="https://github.com/user-attachments/assets/42416137-b579-4ab6-97f9-4ec3f35a4bf1" />
+<img width="1088" height="647" alt="text_agent_benchmark_snapshot-1" src="https://github.com/user-attachments/assets/f78e87f6-96fa-4262-a511-00c7f01dc439" />
+<img width="1430" height="1430" alt="angra_radar_after-1" src="https://github.com/user-attachments/assets/00a3f6b7-38b4-49fb-b594-ce7a5a9680d7" />
+<img width="1440" height="1280" alt="angra_radar_after" src="https://github.com/user-attachments/assets/b616419b-017b-4ae8-b1f3-ae76a250ef0b" />
 
 ## What to expect from it
 
