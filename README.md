@@ -58,6 +58,7 @@ LM Studio or Bionic. It is the layer around them.
 - Grant link permissions **per session** (nothing is permanent by default)
 - Relay structured evidence between models: verify, challenge, reconstruct
 - Bionic integration with resource estimation and a configurable GPU budget
+<img width="1130" height="405" alt="Screenshot 2026-10-07 100752" src="https://github.com/user-attachments/assets/daa1245e-3587-4565-bf00-e1a07e8b72fc" />
 
 ### Engineering principles
 
