@@ -1,7 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 """
 ANGRA - user-controlled local model bridge for LM Studio (Windows).
+Developed by OBLIVION.
+(v3: Angra design system - bloom/orbit/pulse/settle spark motion, live activity
+display, model identity tiers. Presentation only; all behaviour, state, JSON and
+safety invariants are unchanged.)
 
 Two products live in this design (kept explicit on purpose):
 
@@ -509,23 +512,173 @@ PLUGIN_MARKER = ".angra-owned"
 # ----------------------------------------------------------------------------
 # Terminal helpers
 # ----------------------------------------------------------------------------
+import atexit as _atexit
+import math as _math
+import re as _re
+import threading as _threading
+
+
+_ANSI_RE = _re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
 class T:
     color = False
-    blocks = False
+    blocks = False   # legacy flags, all mean "unicode drawing is safe"
+    box = False
     dot = False
+    uni = False
+    depth = 0        # 0 = no colour, 4 / 8 / 24 bit
+    anim = False
+    width = 80
 
 
-_COLORS = {
-    "green": "32", "red": "31", "yellow": "33", "cyan": "36", "blue": "34",
-    "dim": "2", "bold": "1", "grey": "90", "orange": "38;2;217;119;87",
+# Claude palette (RGB). Names kept from v1 so every call site still works.
+_PAL = {
+    "clay": (217, 119, 87), "orange": (217, 119, 87), "shimmer": (245, 149, 117),
+    "cyan": (245, 149, 117), "deep": (160, 74, 44), "sand": (232, 230, 220),
+    "ink": (20, 20, 19), "grey": (176, 174, 165), "green": (78, 186, 101),
+    "red": (255, 107, 128), "yellow": (224, 172, 69), "blue": (106, 155, 204),
 }
+# Semantic roles -> palette names (brand is NOT the colour of everything):
+#   brand=clay  active=shimmer  secondary=grey  success=green  warning=yellow
+#   failure=red  inactive/disabled=dim grey  diagnostic=blue  neutral label=sand
+_B4 = {  # 16-colour fallbacks
+    "clay": "33", "orange": "33", "shimmer": "93", "cyan": "93", "deep": "31",
+    "sand": "37", "ink": "30", "grey": "90", "green": "32", "red": "91",
+    "yellow": "33", "blue": "34",
+}
+
+_UNI = {
+    "spark": "\u273b", "tick": "\u2713", "cross": "\u2717", "warn": "!", "dash": "\u2013",
+    "arrow": "\u203a", "bar": "\u2502", "tl": "\u256d", "tr": "\u256e", "bl": "\u2570",
+    "br": "\u256f", "h": "\u2500", "dot": "\u25cf", "mid": "\u00b7", "ell": "\u2026",
+    "tee": "\u251c\u2500", "last": "\u2514\u2500", "down": "\u2502", "to": "\u2514\u2500\u2500\u2500\u25b6", "ring": "\u25cb",
+}
+_ASC = {
+    "spark": "*", "tick": "+", "cross": "x", "warn": "!", "dash": "-", "arrow": ">",
+    "bar": "|", "tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "-", "dot": "*",
+    "mid": ".", "ell": "...", "tee": "|--", "last": "`--", "down": "|", "to": "+---->", "ring": "o",
+}
+
+
+def gl(name: str) -> str:
+    return (_UNI if T.uni else _ASC)[name]
+
+
+def _to256(rgb):
+    r, gg, b = rgb
+    if abs(r - gg) < 10 and abs(gg - b) < 10:
+        return 232 + max(0, min(23, int(round((r - 8) / 10.0))))
+
+    def c(v):
+        return 0 if v < 48 else 1 if v < 115 else int((v - 35) // 40)
+    return 16 + 36 * c(r) + 6 * c(gg) + c(b)
+
+
+def _rgb_code(rgb, bg: bool = False) -> str:
+    if T.depth >= 24:
+        return "%d;2;%d;%d;%d" % ((48 if bg else 38,) + tuple(rgb))
+    if T.depth >= 8:
+        return "%d;5;%d" % (48 if bg else 38, _to256(rgb))
+    hot = sum(rgb) > 640 or rgb[0] > 240
+    base = 93 if hot else 33
+    return str(base + (10 if bg else 0))
+
+
+def _fg_code(name: str) -> str:
+    if name == "bold":
+        return "1"
+    if name == "dim":
+        return "2"
+    if T.depth >= 8:
+        return _rgb_code(_PAL[name])
+    return _B4[name]
 
 
 def paint(text: str, *names: str) -> str:
     if not T.color:
         return text
-    codes = ";".join(_COLORS[n] for n in names)
-    return "\x1b[%sm%s\x1b[0m" % (codes, text)
+    return "\x1b[%sm%s\x1b[0m" % (";".join(_fg_code(n) for n in names), text)
+
+
+def pill(text: str, name: str = "clay") -> str:
+    """Inverse label. Plain mode falls back to [TEXT]."""
+    if not T.color:
+        return text
+    if T.depth >= 8:
+        bg = _rgb_code(_PAL[name], bg=True)
+        fg = "38;2;20;20;19" if T.depth >= 24 else "38;5;233"
+    else:
+        bg = str(int(_B4[name]) + 10)
+        fg = "30"
+    return "\x1b[%s;%s;1m %s \x1b[0m" % (bg, fg, text)
+
+
+def tag(text: str, name: str = "clay") -> str:
+    """Status label: inverse pill with colour, [Text] without."""
+    return pill(text, name) if T.color else "[%s]" % text
+
+
+def dev_line() -> str:
+    return paint("Developed by ", "dim") + paint("OBLIVION", "sand")
+
+
+def vlen(s: str) -> int:
+    return len(_ANSI_RE.sub("", s))
+
+
+def vpad(s: str, w: int) -> str:
+    return s + " " * max(0, w - vlen(s))
+
+
+def _sgr_state(items) -> str:
+    st = ""
+    for isa, tx in items:
+        if isa:
+            st = "" if tx == "\x1b[0m" else st + tx
+    return st
+
+
+def _join(items) -> str:
+    return "".join(x for _, x in items) + ("\x1b[0m" if _sgr_state(items) else "")
+
+
+def vwrap(s: str, n: int):
+    """Wrap one (possibly coloured) line to n visible columns, breaking at spaces."""
+    if n < 8 or vlen(s) <= n:
+        return [s]
+    items, i = [], 0
+    while i < len(s):
+        m = _ANSI_RE.match(s, i)
+        if m:
+            items.append((True, m.group(0)))
+            i = m.end()
+        else:
+            items.append((False, s[i]))
+            i += 1
+    out, cur, vis = [], [], 0
+    for it in items:
+        if it[0]:
+            cur.append(it)
+            continue
+        if vis >= n:
+            sp = max([k for k, x in enumerate(cur) if x == (False, " ")] + [-1])
+            if sp > 0 and it[1] != " ":
+                head, tail = cur[:sp], cur[sp + 1:]
+            else:
+                head, tail = cur, []
+            out.append(_join(head))
+            cur = [(True, _sgr_state(head))] + tail if _sgr_state(head) else list(tail)
+            vis = sum(1 for a, _ in tail if not a)
+        cur.append(it)
+        vis += 1
+    out.append(_join(cur))
+    return out
+
+
+def _mix(a, b, t):
+    t = max(0.0, min(1.0, t))
+    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
 
 
 def _can_encode(s: str) -> bool:
@@ -551,17 +704,549 @@ def _enable_vt() -> bool:
         return False
 
 
-def setup_terminal(cfg: dict, force_plain: bool, force_ascii: bool) -> None:
+def _color_depth() -> int:
+    forced = os.environ.get("ANGRA_COLOR_DEPTH", "")
+    if forced in ("4", "8", "24"):
+        return int(forced)
+    if os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit") or os.environ.get("WT_SESSION"):
+        return 24
+    if os.environ.get("TERM_PROGRAM") == "Apple_Terminal":
+        return 8
+    if os.environ.get("TERM", "") in ("linux", "vt100", "ansi"):
+        return 4
+    return 24
+
+
+def _term_setup(want_color: bool, want_uni: bool, no_anim: bool) -> None:
     with contextlib.suppress(Exception):
         sys.stdout.reconfigure(errors="replace")  # type: ignore[attr-defined]
         sys.stderr.reconfigure(errors="replace")  # type: ignore[attr-defined]
-    want_color = cfg.get("color", "auto") != "off" and not force_plain and "NO_COLOR" not in os.environ
-    T.color = bool(want_color and sys.stdout.isatty() and _enable_vt())
-    uni = cfg.get("unicode", "auto") != "off" and not force_ascii
-    T.blocks = bool(uni and _can_encode("\u2588\u2580\u2584"))
-    T.dot = bool(uni and _can_encode("\u25cf"))
+    tty = bool(sys.stdout.isatty())
+    vt = bool(tty and _enable_vt())
+    T.depth = _color_depth() if (want_color and vt) else 0
+    T.color = T.depth > 0
+    T.uni = bool(want_uni and _can_encode(
+        "\u2588\u2580\u2584\u256d\u256e\u2570\u256f\u2500\u2502\u2713\u2717\u273b\u25cf\u203a\u00b7\u2026\u2022"
+        "\u2722\u2733\u2736\u273d\u2013\u251c\u2514\u25b6"))
+    T.blocks = T.box = T.dot = T.uni
+    try:
+        T.width = max(40, min(100, shutil.get_terminal_size((80, 24)).columns))
+    except Exception:
+        T.width = 80
+    T.anim = bool(T.color and tty and not no_anim and "ANGRA_NO_ANIM" not in os.environ and T.width >= 56)
 
 
+# ---------------------------------------------------------------- the spark --
+# (angle in degrees counter-clockwise from +x, length, half-width), measured from
+# the reference artwork: twelve irregular, club-tipped rays around a round hub.
+SPARK = [
+    (11.5, 0.800, 0.082), (52.0, 0.854, 0.108), (85.0, 0.864, 0.082), (119.4, 1.000, 0.107),
+    (146.9, 0.947, 0.096), (178.2, 0.933, 0.066), (209.5, 0.863, 0.079), (233.4, 0.874, 0.072),
+    (261.9, 0.844, 0.074), (297.4, 0.799, 0.086), (317.0, 0.818, 0.068), (347.4, 0.808, 0.078),
+]
+SPARK_HUB = 0.28
+_RANK = {idx: r for r, idx in enumerate(sorted(range(12), key=lambda i: (90 - SPARK[i][0]) % 360))}
+_UV = [(_math.cos(_math.radians(a)), _math.sin(_math.radians(a))) for a, _l, _w in SPARK]
+
+
+def spark_grid(px: int, lens, cols, hubscale: float = 1.0, hubcol=None):
+    """px x px grid; each cell None (empty) or an RGB tuple. Pure geometry."""
+    c = px / 2.0
+    unit = c * 0.97
+    hub = SPARK_HUB * hubscale
+    grid = [[None] * px for _ in range(px)]
+    subs = ((0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75))
+    for j in range(px):
+        for i in range(px):
+            hits = 0
+            best = None
+            for sx, sy in subs:
+                x = (i + sx - c) / unit
+                y = (c - (j + sy)) / unit
+                inside = False
+                if x * x + y * y <= hub * hub:
+                    inside = True
+                    owner = -1
+                else:
+                    owner = -1
+                    score = 9.0
+                    for k in range(12):
+                        ln = SPARK[k][1] * lens[k]
+                        hw = SPARK[k][2]
+                        if ln <= hw:
+                            continue
+                        ux, uy = _UV[k]
+                        t = x * ux + y * uy
+                        if t < 0:
+                            continue
+                        d = abs(x * uy - y * ux)
+                        if t <= ln - hw:
+                            ok, s = d <= hw, d / hw
+                        else:
+                            dd = _math.hypot(t - (ln - hw), d)
+                            ok, s = dd <= hw, dd / hw
+                        if ok and s < score:
+                            score, owner = s, k
+                            inside = True
+                if inside:
+                    hits += 1
+                    if best is None:
+                        best = owner
+            if hits >= 2:
+                grid[j][i] = cols[best] if (best is not None and best >= 0) else (hubcol or _PAL["clay"])
+    return grid
+
+
+def _cell(a, b) -> str:
+    if a is None and b is None:
+        return " "
+    if T.depth == 0:
+        return "\u2588" if (a and b) else "\u2580" if a else "\u2584"
+    if b is None:
+        return "\x1b[%sm\u2580\x1b[0m" % _rgb_code(a)
+    if a is None:
+        return "\x1b[%sm\u2584\x1b[0m" % _rgb_code(b)
+    if a == b:
+        return "\x1b[%sm\u2588\x1b[0m" % _rgb_code(a)
+    return "\x1b[%s;%sm\u2580\x1b[0m" % (_rgb_code(a), _rgb_code(b, bg=True))
+
+
+def spark_lines(size: int, lens, cols, hubscale: float = 1.0, hubcol=None):
+    """Render the spark. Unicode: half-blocks (size cols x size/2 rows). ASCII: '##' pixels."""
+    if T.uni:
+        grid = spark_grid(size, lens, cols, hubscale, hubcol)
+        return ["".join(_cell(grid[r][x], grid[r + 1][x]) for x in range(size)) for r in range(0, size - 1, 2)]
+    px = max(8, size // 2)
+    grid = spark_grid(px, lens, cols, hubscale, hubcol)
+    return ["".join("##" if grid[r][x] else "  " for x in range(px)) for r in range(px)]
+
+
+# ---------------------------------------------------------------- motion --
+# One engine, six concepts: BLOOM (entry), ORBIT (working), PULSE (waiting),
+# SHIMMER (label light), TRANSITION (amplitudes glide, nothing restarts) and
+# SETTLE (light decays, then one stable result line). Geometry is the same
+# 12-ray spark everywhere; only ray length, light and hub breathing change.
+def _ease_out(p: float) -> float:
+    p = max(0.0, min(1.0, p))
+    return 1.0 - (1.0 - p) ** 3
+
+
+def _ease_io(p: float) -> float:
+    p = max(0.0, min(1.0, p))
+    return 0.5 - 0.5 * _math.cos(_math.pi * p)
+
+
+def _ease_back(p: float, c1: float = 1.0) -> float:
+    q = p - 1.0
+    return 1.0 + (c1 + 1.0) * q ** 3 + c1 * q ** 2
+
+
+MINI = 10             # px of the live-activity spark (5 terminal rows)
+ORBIT_STEP = 0.22     # rays per frame (about one turn every 4.5 s at 12 fps)
+PULSE_FRAMES = 30     # one breath = 2.5 s at 12 fps
+
+
+def _light(head: float, i: int, spread: float = 3.4) -> float:
+    d = abs((head - _RANK[i] + 6.0) % 12.0 - 6.0)
+    return 0.5 + 0.5 * _math.cos(_math.pi * min(1.0, d / spread))
+
+
+def spark_state(k: int, orbit: float = 0.0, pulse: float = 0.0, grow=None, step: float = ORBIT_STEP):
+    """(ray lengths, ray colours, hub scale, hub colour) for frame k. Pure and deterministic."""
+    head = (k * step) % 12.0
+    s = 0.5 - 0.5 * _math.cos(2.0 * _math.pi * (k % PULSE_FRAMES) / PULSE_FRAMES)
+    lens, cols = [], []
+    for i in range(12):
+        lt = _light(head, i) * orbit
+        ln = 1.0 if grow is None else grow[i]
+        if ln > 0:
+            ln *= 1.0 + 0.04 * lt - 0.05 * pulse * s
+        lens.append(ln)
+        cols.append(_mix(_PAL["clay"], _PAL["shimmer"], 0.95 * lt))
+    return lens, cols, 1.0 + 0.14 * pulse * s, _mix(_PAL["clay"], _PAL["shimmer"], 0.5 * pulse * s)
+
+
+def bloom_state(k: int, total: int):
+    """Hub first, then the rays leave clockwise with a small overshoot that settles."""
+    t = k / float(max(1, total - 1))
+    grow, cols = [], []
+    for i in range(12):
+        p = max(0.0, min(1.0, (t - 0.18 - 0.42 * _RANK[i] / 12.0) / 0.40))
+        grow.append(_ease_back(p) if p > 0 else 0.0)
+        cols.append(_mix(_PAL["clay"], _PAL["shimmer"], (1.0 - p) if 0.0 < p < 1.0 else 0.0))
+    return grow, cols, _ease_out(t / 0.30), _PAL["clay"]
+
+
+def _draw(lines, first: bool, indent: str = "  ") -> None:
+    out = sys.stdout
+    if not first:
+        out.write("\x1b[%dA" % len(lines))
+    for ln in lines:
+        out.write("\r\x1b[2K" + indent + ln + "\n")
+    out.flush()
+
+
+def spark_intro(size: int = 24) -> None:
+    """BLOOM, one ORBIT pass that fades out (SETTLE), then the stable mark stays above the prompt.
+    Without animation support (NO_COLOR, --no-anim, old consoles) a static spark is printed."""
+    size = size if T.width >= 64 else 16
+    rest = ([1.0] * 12, [_PAL["clay"]] * 12)
+    if not T.anim:
+        for ln in spark_lines(size, rest[0], rest[1]):
+            print("  " + ln)
+        return
+    bloom, orbit = 18, 16
+    out = sys.stdout
+    try:
+        out.write("\x1b[?25l")
+        first = True
+        for k in range(bloom):
+            lens, cols, hs, hc = bloom_state(k, bloom)
+            _draw(spark_lines(size, lens, cols, hs, hc), first)
+            first = False
+            time.sleep(1.0 / 24)
+        for k in range(orbit):
+            amp = 1.0 - _ease_io(k / float(orbit - 1))
+            lens, cols, hs, hc = spark_state(k, orbit=amp, step=0.5)
+            _draw(spark_lines(size, lens, cols, hs, hc), False)
+            time.sleep(1.0 / 18)
+        _draw(spark_lines(size, rest[0], rest[1]), False)
+    except (OSError, ValueError):
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            out.write("\x1b[?25h")
+            out.flush()
+
+
+def _fmt_el(sec: float) -> str:
+    s = int(sec)
+    return "%ds" % s if s < 60 else "%dm %02ds" % (s // 60, s % 60)
+
+
+# Presentation phases. A phase is only shown when the program reports the real event.
+_PHASES = {
+    "preparing": ("Preparing", 1.0, 0.0), "validating": ("Validating", 1.0, 0.0),
+    "connecting": ("Connecting", 1.0, 0.0), "generating": ("Generating", 0.55, 1.0),
+    "receiving": ("Receiving", 1.0, 0.0), "finalizing": ("Finalizing", 0.6, 0.3),
+}
+_OUTCOMES = {  # state -> (glyph name, colour, word)
+    "completed": ("tick", "green", "Completed"), "denied": ("warn", "yellow", "Denied"),
+    "failed": ("cross", "red", "Failed"), "cancelled": ("dash", "grey", "Cancelled"),
+    "timed out": ("cross", "red", "Timed out"),
+}
+
+
+class Activity:
+    """Live activity on stderr. Rich form (mini spark + model identity) when a model is involved,
+    compact one-line form otherwise. Silent unless stderr is a real console, so JSON and pipes
+    are never touched. Nested activities are ignored (the outer one owns the display)."""
+
+    current = None
+    DELAY = 0.30      # operations faster than this never flash on screen
+    FPS = 12.0
+
+    def __init__(self, label: str, enabled: bool = True, model=None, role=None, op=None, meta=None):
+        self.label, self.model, self.role, self.op, self.meta = label, model, role, op, meta
+        self.nested = Activity.current is not None
+        self.on = bool(enabled and T.anim and sys.stderr.isatty() and not self.nested)
+        self.rich = bool(self.on and T.uni and model is not None and T.width >= 56)
+        self._stop = _threading.Event()
+        self._lock = _threading.Lock()
+        self._th = None
+        self._t0 = 0.0
+        self._h = 0
+        self._hid = False
+        self.o, self.p = 1.0, 0.0           # current amplitudes (glide towards targets)
+        self.to, self.tp = 1.0, 0.0
+        self.outcome = None
+        self._done = False
+
+    # -- state fed by real events -------------------------------------------------
+    def phase(self, name: str, text=None) -> None:
+        ph = _PHASES.get(name)
+        with self._lock:
+            if ph:
+                self.label, self.to, self.tp = text or ph[0], ph[1], ph[2]
+            elif text:
+                self.label = text
+
+    def set_model(self, model=None, role=None, op=None, meta=None) -> None:
+        with self._lock:
+            if model is not None:
+                self.model = model
+                if self.on and T.uni and T.width >= 56 and not self.rich:
+                    self.rich = True
+            if role is not None:
+                self.role = role
+            if op is not None:
+                self.op = op
+            if meta is not None:
+                self.meta = meta
+
+    def end(self, outcome: str) -> None:
+        self.outcome = outcome
+
+    # -- rendering ---------------------------------------------------------------
+    def _label(self, n: int, text: str) -> str:
+        if T.depth >= 24:
+            hp = (n * 0.55) % (len(text) + 10) - 5.0
+            return "".join("\x1b[%sm%s" % (_rgb_code(_mix(_PAL["clay"], _PAL["sand"], max(0.0, 1.0 - abs(j - hp) / 3.0))), ch)
+                           for j, ch in enumerate(text)) + "\x1b[0m"
+        return "\x1b[%sm%s\x1b[0m" % (_fg_code("clay"), text)
+
+    def _frame(self, n: int):
+        el = time.time() - self._t0
+        with self._lock:
+            label, model, role, op, meta = self.label, self.model, self.role, self.op, self.meta
+        tail = "  " + paint(_fmt_el(el), "dim") if el >= 2 else ""
+        if not self.rich:
+            if T.uni:
+                s = 0.5 - 0.5 * _math.cos(2.0 * _math.pi * (n % 18) / 18.0)
+                mark = "\x1b[%sm%s\x1b[0m" % (_rgb_code(_mix(_PAL["clay"], _PAL["shimmer"], s)) if T.depth >= 24 else _fg_code("clay"), gl("spark"))
+            else:
+                mark = paint("|/-\\"[n % 4], "clay")
+            return ["  " + mark + " " + self._label(n, label + gl("ell")) + tail]
+        lens, cols, hs, hc = spark_state(n, self.o, self.p)
+        sp = spark_lines(MINI, lens, cols, hs, hc)
+        sub = "  ".join(x for x in (role, op) if x)
+        rows = ["", self._label(n, label) + tail, paint(str(model), "bold") + (paint("  " + sub, "dim") if sub else ""), ""]
+        if meta and el >= 5:
+            rows[3] = paint(meta, "dim")
+        out = []
+        cap = max(20, T.width - 14)
+        for i in range(len(sp)):
+            txt = rows[i] if i < len(rows) else ""
+            if vlen(txt) > cap:
+                txt = vwrap(txt, cap)[0]
+            out.append("  " + sp[i] + "   " + txt)
+        return out
+
+    def _paint(self, lines) -> None:
+        err = sys.stderr
+        if not self._hid:
+            err.write("\x1b[?25l")
+            self._hid = True
+            _CURSOR_GUARD.append(self)
+        if self._h:
+            err.write("\x1b[%dA" % self._h)
+        for ln in lines:
+            err.write("\r\x1b[2K" + ln + "\n")
+        self._h = len(lines)
+        err.flush()
+
+    def _clear(self) -> None:
+        err = sys.stderr
+        if self._h:
+            err.write("\x1b[%dA\r\x1b[J" % self._h)
+            self._h = 0
+        else:
+            err.write("\r\x1b[2K")
+        if self._hid:
+            err.write("\x1b[?25h")
+            self._hid = False
+        err.flush()
+
+    def _run(self) -> None:
+        if self._stop.wait(self.DELAY):
+            return
+        n = 0
+        while not self._stop.is_set():
+            try:
+                self.o += (self.to - self.o) * 0.18     # TRANSITION: glide, never restart
+                self.p += (self.tp - self.p) * 0.18
+                self._paint(self._frame(n))
+            except (OSError, ValueError):
+                return
+            n += 1
+            self._stop.wait(1.0 / self.FPS)
+
+    def _result(self, state: str) -> str:
+        g, col, word = _OUTCOMES[state]
+        el = time.time() - self._t0
+        bits = [x for x in (self.model, _fmt_el(el) if el >= 1 else None) if x]
+        return "  " + paint(gl(g), col, "bold") + " " + paint(word, "bold") + (
+            "  " + paint((" " + gl("mid") + " ").join(str(b) for b in bits), "dim") if bits else "")
+
+    def __enter__(self):
+        if self.on:
+            self._t0 = time.time()
+            Activity.current = self
+            self._th = _threading.Thread(target=self._run, daemon=True)
+            self._th.start()
+        return self
+
+    def finish(self, et=None, ev=None) -> None:
+        if not self.on or self._done:
+            return
+        self._done = True
+        self._stop.set()
+        if self._th is not None:
+            self._th.join(timeout=1.0)
+        Activity.current = None
+        state = self.outcome
+        if state is None:
+            if et is None:
+                state = "completed"
+            elif issubclass(et, KeyboardInterrupt):
+                state = "cancelled"
+            elif getattr(ev, "code", None) == 3:
+                state = "denied"
+            elif getattr(ev, "category", None) == "timeout":
+                state = "timed out"
+            else:
+                state = "failed"
+        try:
+            if self._h and self.rich:                  # SETTLE: light and breathing fade out
+                for j in range(6):
+                    f = 1.0 - _ease_out((j + 1) / 6.0)
+                    self.o, self.p = self.o * f, self.p * f
+                    lens, cols, hs, hc = spark_state(40 + j, self.o, self.p)
+                    self._paint(self._frame_static(lens, cols, hs, hc))
+                    time.sleep(0.05)
+            self._clear()
+            if self.rich:
+                sys.stderr.write(self._result(state) + "\n")
+                sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
+
+    def __exit__(self, et, ev, tb):
+        self.finish(et, ev)
+        return False
+
+    def _frame_static(self, lens, cols, hs, hc):
+        sp = spark_lines(MINI, lens, cols, hs, hc)
+        with self._lock:
+            model, role, op = self.model, self.role, self.op
+        sub = "  ".join(x for x in (role, op) if x)
+        rows = ["", paint(self.label, "clay"), paint(str(model), "bold") + (paint("  " + sub, "dim") if sub else ""), ""]
+        rows += [""] * len(sp)
+        return ["  " + sp[i] + "   " + rows[i] for i in range(len(sp))]
+
+
+Spinner = Activity       # v2 call sites keep working
+_CURSOR_GUARD: list = []
+
+
+def _restore_cursor() -> None:
+    if _CURSOR_GUARD:
+        with contextlib.suppress(Exception):
+            sys.stderr.write("\x1b[?25h")
+            sys.stderr.flush()
+
+
+_atexit.register(_restore_cursor)
+
+
+def act_phase(name: str, text=None) -> None:
+    a = Activity.current
+    if a is not None:
+        a.phase(name, text)
+
+
+def act_model(model=None, role=None, op=None, meta=None) -> None:
+    a = Activity.current
+    if a is not None:
+        a.set_model(model, role, op, meta)
+
+
+def act_done() -> None:
+    """The real operation is over: settle and print the result line before any stdout output."""
+    a = Activity.current
+    if a is not None:
+        a.finish()
+
+
+def act_end(outcome: str) -> None:
+    a = Activity.current
+    if a is not None:
+        a.end(outcome)
+
+
+# ------------------------------------------------------------ layout helpers --
+def panel(title: str, lines, width: int = 0, accent: str = "clay"):
+    """Rounded panel (clay border, title inset into the top edge)."""
+    cap = max(24, T.width - 4)
+    inner_need = max([vlen(x) for x in lines] + [0])
+    w = width or min(cap, 80)
+    w = min(max(w, inner_need + 4, vlen(title) + 8), cap)
+    wrapped = []
+    for ln in lines:
+        wrapped.extend(vwrap(ln, w - 4))
+    lines = wrapped
+    ttl = (" %s " % title) if title else ""
+    top = (paint(gl("tl") + gl("h"), accent) + paint(ttl, "bold")
+           + paint(gl("h") * (w - 3 - vlen(ttl)) + gl("tr"), accent))
+    out = [top]
+    for ln in lines:
+        out.append(paint(gl("bar"), accent) + " " + vpad(ln, w - 4) + " " + paint(gl("bar"), accent))
+    out.append(paint(gl("bl") + gl("h") * (w - 2) + gl("br"), accent))
+    return out
+
+
+def emit(lines, indent: str = "  ") -> None:
+    for ln in lines:
+        print(indent + ln)
+
+
+def section(title: str, width: int = 56) -> None:
+    print()
+    print("  " + paint(gl("spark"), "clay") + " " + paint(title, "bold"))
+    print("  " + paint(gl("h") * min(width, max(8, T.width - 6)), "dim"))
+
+
+def kv(label: str, value: str, width: int = 12) -> None:
+    print("  " + paint(vpad(label, width), "dim") + value)
+
+
+def step(kind: str, msg: str) -> None:
+    sym = {"ok": ("tick", "green"), "!!": ("warn", "yellow"), "??": ("warn", "yellow"), "--": ("dash", "grey")}.get(kind, ("warn", "yellow"))
+    mark = paint(gl(sym[0]), sym[1], "bold") if T.uni else "[%s]" % kind
+    print("  %s %s" % (mark, msg))
+
+
+def prompt_str(name: str) -> str:
+    return paint(gl("spark"), "clay") + " " + paint(name, "clay", "bold") + paint(" " + gl("arrow") + " ", "dim")
+
+
+def print_help(text: str) -> None:
+    for i, ln in enumerate(text.split("\n")):
+        m = _re.match(r"^(  )(\S.*?)(\s{2,})(\S.*)$", ln)
+        if i == 0 and ln.startswith("Usage:"):
+            head, _, rest = ln.partition(" ")
+            print(paint(gl("spark"), "clay") + " " + paint(head, "bold") + " " + rest)
+        elif m:
+            print(m.group(1) + paint(m.group(2), "clay") + m.group(3) + m.group(4))
+        elif ln.startswith("Angra never") or ln.startswith("Modes:"):
+            print(paint(ln, "dim"))
+        elif ln.startswith("  ") and ln.strip() and not ln.startswith("   "):
+            print("  " + paint(ln.strip(), "clay"))
+        else:
+            print(ln)
+    print()
+    print("  " + paint("Angra  " + gl("mid") + "  Local Intelligence Bridge  " + gl("mid") + "  ", "dim") + dev_line())
+
+
+def dot(kind: str) -> str:
+    col = {"ok": "green", "bad": "red", "warn": "yellow", "sel": "clay"}[kind]
+    return paint(gl("dot"), col)
+
+
+def level_tag(level: str) -> str:
+    if not T.uni:
+        return paint("[%s]" % level, {"PASS": "green", "WARN": "yellow", "FAIL": "red", "SKIP": "grey"}[level])
+    sym = {"PASS": (gl("tick"), "green"), "WARN": (gl("warn"), "yellow"), "FAIL": (gl("cross"), "red"), "SKIP": (gl("dash"), "grey")}[level]
+    return paint(sym[0], sym[1], "bold")
+
+
+def report_summary(passed: int, warned: int, failed: int) -> str:
+    return "%s, %s, %s" % (paint("%d passed" % passed, "green"),
+                           paint("%d warnings" % warned, "yellow" if warned else "grey"),
+                           paint("%d failed" % failed, "red" if failed else "grey"))
+
+
+# The Angra mark (pixel mascot) - same 12x8 grid as v1, now palette-aware.
 LOGO_GRID = [
     "..XXXXXXXX..",
     "..XEXXXXEX..",
@@ -572,12 +1257,12 @@ LOGO_GRID = [
     "..X.X..X.X..",
     "..X.X..X.X..",
 ]
-_RGB = {"X": (217, 119, 87), "E": (20, 20, 20)}
+_RGB = {"X": (217, 119, 87), "E": (20, 20, 19)}
 
 
-def render_logo() -> List[str]:
+def render_logo() -> list:
     """Terminal version of the Angra mark (pixel invader: 12x8 grid)."""
-    lines: List[str] = []
+    lines = []
     if not T.blocks:
         for row in LOGO_GRID:
             lines.append("".join("##" if ch == "X" else "  " for ch in row))
@@ -585,18 +1270,9 @@ def render_logo() -> List[str]:
     for r in range(0, len(LOGO_GRID), 2):
         s = ""
         for a, b in zip(LOGO_GRID[r], LOGO_GRID[r + 1]):
+            ca, cb = _RGB.get(a), _RGB.get(b)
             if T.color:
-                ca, cb = _RGB.get(a), _RGB.get(b)
-                if ca is None and cb is None:
-                    s += " "
-                elif cb is None:
-                    s += "\x1b[38;2;%d;%d;%dm\u2580\x1b[0m" % ca
-                elif ca is None:
-                    s += "\x1b[38;2;%d;%d;%dm\u2584\x1b[0m" % cb
-                elif ca == cb:
-                    s += "\x1b[38;2;%d;%d;%dm\u2588\x1b[0m" % ca
-                else:
-                    s += "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm\u2580\x1b[0m" % (ca + cb)
+                s += _cell(ca, cb)
             else:
                 ta, tb = a == "X", b == "X"
                 s += "\u2588" if ta and tb else "\u2580" if ta else "\u2584" if tb else " "
@@ -604,31 +1280,39 @@ def render_logo() -> List[str]:
     return lines
 
 
+def setup_terminal(cfg: dict, force_plain: bool, force_ascii: bool, no_anim: bool = False) -> None:
+    want_color = cfg.get("color", "auto") != "off" and not force_plain and "NO_COLOR" not in os.environ
+    want_uni = cfg.get("unicode", "auto") != "off" and not force_ascii
+    _term_setup(bool(want_color), bool(want_uni), no_anim)
+
+
 def banner() -> None:
     logo = render_logo()
-    side = ["", paint("A N G R A", "orange", "bold"), "Local Model Bridge for LM Studio",
-            paint("v%s  |  user chooses. LM Studio runs. Angra connects." % ANGRA_VERSION, "dim")]
-    if len(logo) > 4:
-        side = [""] * 2 + side
+    side = [paint(gl("spark"), "clay") + " " + paint("A N G R A", "clay", "bold"),
+            paint("Local Intelligence Bridge", "bold"),
+            paint("for LM Studio  %s  v%s" % (gl("mid"), ANGRA_VERSION), "dim"),
+            paint("user chooses %s LM Studio runs %s Angra connects" % (gl("mid"), gl("mid")), "dim"),
+            "", dev_line()]
+    if T.width < 74:
+        side = [x for x in side if x != "" and "user chooses" not in x]
+    if T.width < 56:
+        logo = []
+    lw = max([vlen(x) for x in logo] + [0])
+    off = max(0, (len(logo) - len(side)) // 2)
+    body = [""]
+    for i in range(max(len(logo), len(side) + off)):
+        left = logo[i] if i < len(logo) else ""
+        j = i - off
+        right = side[j] if 0 <= j < len(side) else ""
+        body.append(vpad(left, lw) + "   " + right)
+    body.append("")
     print()
-    for i, ln in enumerate(logo):
-        print("  " + ln + "   " + (side[i] if i < len(side) else ""))
+    emit(panel("Angra", body))
     print()
 
 
 def rule() -> str:
-    return ("\u2500" if T.blocks else "-") * 56
-
-
-def dot(kind: str) -> str:
-    ch = "\u25cf" if T.dot else "*"
-    col = {"ok": "green", "bad": "red", "warn": "yellow"}[kind]
-    return paint(ch, col)
-
-
-def level_tag(level: str) -> str:
-    col = {"PASS": "green", "WARN": "yellow", "FAIL": "red", "SKIP": "grey"}[level]
-    return paint("[%s]" % level, col)
+    return paint(gl("h") * min(56, max(8, T.width - 6)), "dim")
 
 
 class UserError(Exception):
@@ -639,10 +1323,11 @@ class UserError(Exception):
 
 
 def print_error(e: UserError) -> None:
-    print(paint("ERROR", "red", "bold"))
-    print(e.title)
+    bar = paint(gl("bar"), "red")
+    print(paint(gl("cross") + " ERROR", "red", "bold"))
+    print(bar + " " + e.title)
     for ln in e.lines:
-        print(ln)
+        print(bar + " " + ln if ln else bar)
 
 
 # ----------------------------------------------------------------------------
@@ -928,6 +1613,11 @@ def _is_embedding(e: dict) -> bool:
 
 
 def discover(lms: Optional[str]) -> Snapshot:
+    with Spinner("Reading LM Studio"):
+        return _discover_impl(lms)
+
+
+def _discover_impl(lms: Optional[str]) -> Snapshot:
     if not lms:
         return Snapshot([], False, False, ["lms CLI not found"])
     errors: List[str] = []
@@ -1221,19 +1911,19 @@ def link_state(st: dict, snap: Snapshot, primary: str, helper: str) -> str:
 def model_tags(st: dict, snap: Snapshot, m: Model) -> str:
     tags = []
     if st["primary"] == m.key:
-        tags.append(paint("PRIMARY", "cyan"))
+        tags.append(tag("Primary", "clay"))
     helper_of = [p for p, hs in st["links"].items() if m.key in hs]
     if helper_of:
-        tags.append(paint("HELPER", "blue"))
+        tags.append(tag("Helper", "blue"))
     if perm_effective(st, m.key)[1]:
-        tags.append(paint("AUTHORIZED", "yellow"))
+        tags.append(tag("Authorized", "sand"))
     for p in helper_of:
         s = link_state(st, snap, p, m.key)
         if s == "CONNECTED":
-            tags.append(paint("CONNECTED", "green"))
+            tags.append(tag("Connected", "green"))
             break
         if s == "PAUSED":
-            tags.append(paint("PAUSED", "yellow"))
+            tags.append(tag("Paused", "yellow"))
             break
     return "  ".join(tags)
 
@@ -1247,11 +1937,11 @@ def print_models(app: App, only_loaded: bool = False) -> None:
         print("  (no models to show)")
         return
     for m in shown:
-        mark = dot("ok" if m.loaded else "bad") if T.color else ("[GREEN]" if m.loaded else "[RED]  ")
+        mark = (paint(gl("dot"), "green") if m.loaded else paint(gl("ring"), "grey")) if T.color else ("[GREEN]" if m.loaded else "[RED]  ")
         vis = 1 if T.color else 7
-        label = paint("LOADED", "green") if m.loaded else paint("NOT LOADED", "red")
+        label = paint("Loaded", "green") if m.loaded else paint("Not loaded", "dim")
         extra = ("  " + paint("(%s)" % m.key, "dim")) if m.key != m.name else ""
-        print("  %s %s%s" % (mark, m.name, extra))
+        print("  %s %s%s" % (mark, paint(m.name, "bold"), extra))
         print("  %s %s  %s" % (" " * vis, label, model_tags(st, snap, m)))
         print()
 
@@ -1270,12 +1960,16 @@ def print_dashboard(app: App) -> None:
     online = snap.ls_ok or snap.ps_ok
     plug_ok, plug_msg = plugin_status(app, st)
     ready = online and plug_ok
-    print("  %-11s %s %s" % ("LM STUDIO", dot("ok" if online else "bad"), "ONLINE" if online else "OFFLINE / lms unavailable"))
-    print("  %-11s %s %s" % ("PLUGIN", dot("ok" if plug_ok else "warn"), "INSTALLED" if plug_ok else "NOT READY - " + plug_msg))
-    print("  %-11s %s %s" % ("BRIDGE", dot("ok" if ready else "warn"), "READY" if ready else "NOT READY"))
+    def row(label: str, kind: str, text: str) -> str:
+        col = {"ok": "green", "warn": "yellow", "bad": "red"}[kind]
+        return "%s %s %s" % (paint("%-9s" % label, "dim"), dot(kind), paint(text, col, "bold"))
+    emit(panel("Status", [
+        row("LM Studio", "ok" if online else "bad", "Online" if online else "Offline / lms unavailable"),
+        row("Plugin", "ok" if plug_ok else "warn", "Installed" if plug_ok else "Not ready - " + plug_msg),
+        row("Bridge", "ok" if ready else "warn", "Ready" if ready else "Not ready"),
+    ]))
+    section("Models")
     print()
-    print(paint("  MODELS", "bold"))
-    print("  " + rule())
     print_models(app)
 
 
@@ -1286,13 +1980,13 @@ def print_links(app: App) -> None:
         return
     names = {m.key: m.name for m in snap.models}
     for p, hs in st["links"].items():
-        print(paint(names.get(p, p), "cyan") + "  (primary)")
+        print(paint(names.get(p, p), "clay", "bold") + paint("  (primary)", "dim"))
         for i, h in enumerate(hs):
             s = link_state(st, snap, p, h)
             col = {"CONNECTED": "green", "LINKED": "yellow", "PAUSED": "yellow"}[s]
             note = {"CONNECTED": "", "LINKED": "  - not authorized (angra allow)",
                     "PAUSED": "  - PAUSED / UNAVAILABLE (model not loaded)"}[s]
-            print("  %s %s  [%s]%s" % ("`--" if i == len(hs) - 1 else "|--", names.get(h, h), paint(s, col), note))
+            print("  %s %s  [%s]%s" % (paint(gl("last") if i == len(hs) - 1 else gl("tee"), "dim"), names.get(h, h), paint(s, col), note))
 
 
 def print_permissions(app: App) -> None:
@@ -1337,18 +2031,19 @@ def cmd_status(app: App) -> int:
     st, snap = app.state(), app.snapshot(refresh=True)
     online = snap.ls_ok or snap.ps_ok
     plug_ok, plug_msg = plugin_status(app, st)
-    print("LM Studio : %s" % ("ONLINE" if online else "OFFLINE / lms unavailable"))
-    print("lms CLI   : %s" % (app.lms() or "not found"))
-    print("Plugin    : %s (%s)" % ("INSTALLED" if plug_ok else "NOT READY", plug_msg))
+    section("Status")
+    kv("LM Studio", "%s %s" % (dot("ok" if online else "bad"), paint("Online", "green", "bold") if online else paint("Offline / lms unavailable", "red", "bold")))
+    kv("lms CLI", app.lms() or paint("not found", "red"))
+    kv("Plugin", "%s %s" % (dot("ok" if plug_ok else "warn"), ("%s (%s)" % (paint("Installed", "green", "bold"), plug_msg)) if plug_ok else ("%s (%s)" % (paint("Not ready", "yellow", "bold"), plug_msg))))
     names = {m.key: m.name for m in snap.models}
-    print("Primary   : %s" % (names.get(st["primary"], st["primary"]) if st["primary"] else "(not set)"))
+    kv("Primary", paint(names.get(st["primary"], st["primary"]), "clay", "bold") if st["primary"] else paint("(not set)", "dim"))
     n = sum(len(v) for v in st["links"].values())
-    print("Links     : %d" % n)
+    kv("Links", "%d" % n)
     s = st["safety"]
-    print("Safety    : helpers=%d parallel=%s calls/response=%d recursion=%s ctx=%d out=%d timeout=%ds" % (
+    kv("Safety", "helpers=%d parallel=%s calls/response=%d recursion=%s ctx=%d out=%d timeout=%ds" % (
         s["max_active_helpers"], s["parallel_helpers"], s["max_helper_calls_per_response"],
         s["recursive_delegation"], s["max_helper_context"], s["max_helper_output"], s["timeout_seconds"]))
-    print("Inference : LM Studio only. Angra inference: NONE")
+    kv("Inference", paint("LM Studio only. Angra inference: NONE", "dim"))
     return 0
 
 
@@ -1394,7 +2089,10 @@ def cmd_link(app: App, args: List[str]) -> int:
         st["primary"] = p.key
     app.store.save(st)
     log.info("link added: %s -> %s", p.key, h.key)
-    print("LINK CREATED\n\n  %s\n      |\n      +----> %s\n" % (p.name, h.name))
+    print(paint(gl("tick") + " Link created", "green", "bold") + "\n")
+    print("  " + paint(p.name, "clay", "bold"))
+    print("      " + paint(gl("down"), "dim"))
+    print("      " + paint(gl("to"), "dim") + " " + paint(h.name, "blue", "bold") + "\n")
     print("Nothing was loaded or started. The helper still needs permission: angra allow \"%s\"" % h.name)
     if st["primary"] != p.key:
         print(paint("Note: your declared primary is a different model; run: angra primary \"%s\"" % p.name, "yellow"))
@@ -1432,9 +2130,11 @@ def cmd_connect(app: App, args: List[str]) -> int:
         app.store.save(st)
     log.info("connect: %s -> %s", st["primary"], h.key)
     state = "CONNECTED" if perm_effective(st, h.key)[1] else "LINKED (waiting for your permission)"
-    print("CONNECTION ESTABLISHED\n\nPrimary:\n%s\n\nHelper:\n%s\n\nState:\n%s\n" % (
-        names.get(st["primary"], st["primary"]), h.name, state))
-    print("Inference owner: LM Studio\nAngra inference: NONE")
+    print(paint(gl("tick") + " Connection established", "green", "bold") + "\n")
+    print(paint("Primary:", "dim") + "\n" + paint(names.get(st["primary"], st["primary"]), "clay", "bold") + "\n")
+    print(paint("Helper:", "dim") + "\n" + paint(h.name, "blue", "bold") + "\n")
+    print(paint("State:", "dim") + "\n" + state + "\n")
+    print(paint("Inference owner: LM Studio\nAngra inference: NONE", "dim"))
     if not perm_effective(st, h.key)[1]:
         print("\nAuthorize it with: angra allow \"%s\" [--once|--session]" % h.name)
     return 0
@@ -1511,8 +2211,8 @@ class Report:
 
     def print(self) -> None:
         for level, name, detail in self.rows:
-            print("%s %-22s %s" % (level_tag(level), name, detail))
-        print("\n%d passed, %d warnings, %d failed" % (self.count("PASS"), self.count("WARN"), self.count("FAIL")))
+            print("  %s %-22s %s" % (level_tag(level), name, paint(detail, "dim") if level == "SKIP" else detail))
+        print("\n  " + report_summary(self.count("PASS"), self.count("WARN"), self.count("FAIL")))
 
 
 def lms_dev_install_capable(lms: str) -> Tuple[bool, str]:
@@ -1747,7 +2447,8 @@ def register_plugin(app: App, lms: str) -> Tuple[bool, str]:
     """Official mechanism: `lms dev --install` from the plugin directory."""
     cwd = str(app.plugin_dir)
     for cmd in ([lms, "dev", "--install", "-y"], [lms, "dev", "--install"]):
-        rc, out, err = run(cmd, timeout=240, cwd=cwd)
+        with Spinner("Registering the plugin with LM Studio"):
+            rc, out, err = run(cmd, timeout=240, cwd=cwd)
         text = (out + err).strip()
         if rc == 0:
             log.info("plugin registered via: %s", " ".join(cmd[1:]))
@@ -1769,8 +2470,8 @@ def cmd_install(app: App, repair: bool = False) -> int:
         raise UserError("Python 3.8 or newer is required.")
     banner()
     title = "REPAIR" if repair else "INSTALL"
-    print(paint("ANGRA %s" % title, "bold"))
-    print("  [ok] Windows / Python %s" % sys.version.split()[0])
+    section(title.capitalize())
+    step("ok", "Windows / Python %s" % sys.version.split()[0])
     stamp = time.strftime("%Y%m%d-%H%M%S")
     setup_logging(app.home)
     app.home.mkdir(parents=True, exist_ok=True)
@@ -1782,7 +2483,7 @@ def cmd_install(app: App, repair: bool = False) -> int:
 
     lms = app.lms()
     app_path = find_lmstudio_app()
-    print("  [%s] LM Studio %s" % ("ok" if app_path else "??", app_path or "application not located"))
+    step("ok" if app_path else "??", "LM Studio %s" % (app_path or "application not located"))
     if not lms:
         raise UserError("The `lms` CLI was not found.", [
             "Start LM Studio once, then run `lms bootstrap` (or enable the CLI in LM Studio),",
@@ -1790,44 +2491,44 @@ def cmd_install(app: App, repair: bool = False) -> int:
     rc, _, err = run([lms, "--help"], timeout=20)
     if rc != 0:
         raise UserError("`lms --help` failed.", [err.strip()[:200]])
-    print("  [ok] lms CLI %s" % lms)
+    step("ok", "lms CLI %s" % lms)
     inst["lms_path"] = lms
 
     cfgp = app.home / "config.json"
     if not cfgp.is_file():
         atomic_write_text(cfgp, json.dumps(DEFAULT_CONFIG, indent=2) + "\n")
-        print("  [ok] config created")
+        step("ok", "config created")
     if install_self(app, stamp):
-        print("  [ok] Angra.py copied to %s" % app.script_copy)
+        step("ok", "Angra.py copied to %s" % app.script_copy)
     changed = write_plugin_files(app, stamp)
-    print("  [ok] plugin project %s (%d file(s) written)" % (app.plugin_dir, len(changed)))
+    step("ok", "plugin project %s (%d file(s) written)" % (app.plugin_dir, len(changed)))
     inst.update({"home": str(app.home), "plugin_dir": str(app.plugin_dir)})
 
     capable, msg = lms_dev_install_capable(lms)
-    print("  [%s] plugin support: %s" % ("ok" if capable else "!!", msg))
+    step("ok" if capable else "!!", "plugin support: %s" % msg)
     if capable and (changed or not inst.get("plugin_registered") or not repair):
         ok, detail = register_plugin(app, lms)
         inst["plugin_registered"] = ok
-        print("  [%s] %s" % ("ok" if ok else "!!", detail))
+        step("ok" if ok else "!!", detail)
         partial |= not ok
     elif not capable:
         partial = True
         print("      Fallback: run `lms dev` inside the plugin folder to load it in development mode.")
 
     if write_launcher(app, stamp):
-        print("  [ok] launcher %s" % app.launcher)
+        step("ok", "launcher %s" % app.launcher)
     inst["launcher"] = str(app.launcher)
     inst["path_entry"] = str(app.bin_dir)
     try:
         if not user_path_has(str(app.bin_dir)):
             user_path_add(str(app.bin_dir))
             inst["path_added"] = True
-            print("  [ok] added launcher directory to your user PATH")
+            step("ok", "added launcher directory to your user PATH")
         else:
-            print("  [ok] launcher directory already on user PATH")
+            step("ok", "launcher directory already on user PATH")
     except OSError as e:
         partial = True
-        print("  [!!] could not update user PATH: %s" % e)
+        step("!!", "could not update user PATH: %s" % e)
 
     if not inst.get("installed_at"):
         inst["installed_at"] = now_iso()
@@ -1841,7 +2542,7 @@ def cmd_install(app: App, repair: bool = False) -> int:
         vok = p.returncode == 0 and ANGRA_VERSION.encode() in p.stdout
     except (OSError, subprocess.TimeoutExpired):
         vok = False
-    print("  [%s] launcher check: `angra version`" % ("ok" if vok else "!!"))
+    step("ok" if vok else "!!", "launcher check: `angra version`")
     partial |= not vok
     print()
     rep = run_doctor(app)
@@ -1880,7 +2581,7 @@ def _safe_rmtree(target: Path, must_be_inside: Path) -> bool:
 
 def cmd_uninstall(app: App) -> int:
     st = app.state()
-    print(paint("ANGRA UNINSTALL", "bold"))
+    section("Uninstall")
     print("This will remove ONLY Angra-owned items:")
     print("  - the Angra plugin (registered copy + generated project)")
     print("  - the angra.cmd launcher and the user PATH entry Angra added")
@@ -1899,22 +2600,22 @@ def cmd_uninstall(app: App) -> int:
     for d in find_installed_plugin_dirs():
         if _safe_rmtree(d, plugins_root()):
             removed += 1
-    print("  [ok] registered plugin copies removed: %d" % removed)
+    step("ok", "registered plugin copies removed: %d" % removed)
     if lms is None:
-        print("  [--] lms not found; if the plugin still shows in LM Studio, remove it there.")
+        step("--", "lms not found; if the plugin still shows in LM Studio, remove it there.")
 
     marker_ok = (app.plugin_dir / PLUGIN_MARKER).is_file()
     if app.plugin_dir.exists():
         if marker_ok and _safe_rmtree(app.plugin_dir, app.home):
-            print("  [ok] generated plugin project removed")
+            step("ok", "generated plugin project removed")
         else:
-            print("  [!!] %s has no Angra marker; left untouched" % app.plugin_dir)
+            step("!!", "%s has no Angra marker; left untouched" % app.plugin_dir)
     with contextlib.suppress(OSError):
         (app.home / "plugin").rmdir()
 
     if app.launcher.is_file():
         app.launcher.unlink()
-        print("  [ok] launcher removed")
+        step("ok", "launcher removed")
     with contextlib.suppress(OSError):
         app.bin_dir.rmdir()
 
@@ -1922,9 +2623,9 @@ def cmd_uninstall(app: App) -> int:
     if winreg is not None and inst.get("path_added") and inst.get("path_entry"):
         try:
             if user_path_remove(str(inst["path_entry"])):
-                print("  [ok] removed Angra's user PATH entry")
+                step("ok", "removed Angra's user PATH entry")
         except OSError as e:
-            print("  [!!] could not edit user PATH: %s" % e)
+            step("!!", "could not edit user PATH: %s" % e)
 
     logging.shutdown()
     for h in list(log.handlers):
@@ -1940,7 +2641,7 @@ def cmd_uninstall(app: App) -> int:
         _safe_rmtree(app.home / sub, app.home) if (app.home / sub).exists() else None
     with contextlib.suppress(OSError):
         app.home.rmdir()
-    print("  [ok] Angra files removed" + ("" if not app.home.exists() else " (folder kept: contains other files)"))
+    step("ok", "Angra files removed" + ("" if not app.home.exists() else " (folder kept: contains other files)"))
     print("Uninstall complete. Open a new Command Prompt window for PATH to refresh.")
     return 0
 
@@ -1975,7 +2676,7 @@ def dispatch(app: App, argv: List[str]) -> int:
         "repair": lambda: cmd_repair(app),
         "uninstall": lambda: cmd_uninstall(app),
         "version": cmd_version,
-        "help": lambda: (print(HELP), 0)[1],
+        "help": lambda: (print_help(HELP), 0)[1],
     }
     if cmd in ("exit", "quit"):
         return 0
@@ -1987,7 +2688,8 @@ def dispatch(app: App, argv: List[str]) -> int:
 
 
 def shell(app: App) -> int:
-    prompt = paint("angra", "orange", "bold") + paint(" > ", "dim")
+    spark_intro()
+    prompt = prompt_str("angra")
     while True:
         try:
             line = input(prompt)
@@ -2016,9 +2718,10 @@ def shell(app: App) -> int:
 def main(argv: List[str]) -> int:
     force_plain = "--no-color" in argv
     force_ascii = "--ascii" in argv
-    argv = [a for a in argv if a not in ("--no-color", "--ascii")]
+    no_anim = "--no-anim" in argv
+    argv = [a for a in argv if a not in ("--no-color", "--ascii", "--no-anim")]
     app = App()
-    setup_terminal(app.cfg, force_plain, force_ascii)
+    setup_terminal(app.cfg, force_plain, force_ascii, no_anim)
     if app.home.is_dir():
         setup_logging(app.home)
     try:
@@ -2026,7 +2729,7 @@ def main(argv: List[str]) -> int:
             banner()
             print_dashboard(app)
             if sys.stdin.isatty():
-                print("  Type `help` for commands, `exit` to leave.\n")
+                print("  " + paint("Type `help` for commands, `exit` to leave.", "dim") + "\n")
                 return shell(app)
             return 0
         if argv[0] in ("-h", "--help"):
