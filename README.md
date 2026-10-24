@@ -3,7 +3,8 @@
 # Angra 
 
 **Local-first observability and model-to-model coordination for LM Studio and Bionic.**
-<img width="1024" height="1536" alt="file_00000000b61482108f0418ab8ff96ee5" src="https://github.com/user-attachments/assets/6751ff44-5cd0-4efc-9351-bdfb037de923" />
+<img width="1080" height="373" alt="Screenshot_20261023_121901_Claude" src="https://github.com/user-attachments/assets/a61742d0-f88d-42d4-9c80-eabbd3d445e5" />
+
 
 *Observe. Analyze. Verify. Challenge. Reconstruct. Coordinate.*
 
@@ -27,6 +28,7 @@ python nythosplus.py doctor
 python nythosplus.py self-test
 ```
 ## What is ANGRA?
+<img width="1080" height="600" alt="Screenshot_20261023_121908_Claude" src="https://github.com/user-attachments/assets/3299ec8b-ceb6-4a4d-b36a-ef7974742d9e" />
 
 Running several local models does not automatically make them a team, and it
 does not tell you what they are actually doing.
@@ -45,6 +47,7 @@ LM Studio or Bionic. It is the layer around them.
 
 <img width="1536" height="1024" alt="file_000000002dac82109879474e5a09ecdf" src="https://github.com/user-attachments/assets/0e333f63-e3b3-416c-913e-1198200cd0d9" />
 
+<img width="1080" height="574" alt="Screenshot_20261023_121914_Claude" src="https://github.com/user-attachments/assets/f2f01897-991e-4fea-bbd6-2c7f37463d8e" />
 
 ## Features
 
@@ -174,6 +177,9 @@ instead of forwarding an entire chat transcript:
   "status": "ready"
 }
 ```
+<img width="1080" height="468" alt="Screenshot_20261023_121926_Claude" src="https://github.com/user-attachments/assets/0c127ffc-37fa-4c7a-94c9-6226fc7c6217" />
+<img width="2160" height="960" alt="Screenshot_20261023_121933_Claude" src="https://github.com/user-attachments/assets/8ed4d668-d992-4f9e-90ab-aeb408100469" />
+
 
 ## Security model
 
